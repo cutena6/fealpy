@@ -27,6 +27,7 @@ class QuadrangleMeshDataStructure(Mesh2dDataStructure):
         super().__init__(NN, cell)
 
 
+## @defgroup MeshGenerators TetrhedronMesh Common Region Mesh Generators
 class QuadrangleMesh(Mesh2d):
     """
     @brief 非结构四边形网格数据结构对象
@@ -65,12 +66,17 @@ class QuadrangleMesh(Mesh2d):
         if isinstance(bc, tuple):
             assert len(bc) == 2
             cell = self.entity('cell')[index]
-            bc0 = bc[0] # (NQ0, 2)
-            bc1 = bc[1] # (NQ1, 2)
+
+            bc0 = bc[0].reshape(-1, 2) # (NQ0, 2)
+            bc1 = bc[1].reshape(-1, 2) # (NQ1, 2)
             bc = np.einsum('im, jn->ijmn', bc0, bc1).reshape(-1, 4) # (NQ0, NQ1, 2, 2)
+
             # node[cell].shape == (NC, 4, 2)
             # bc.shape == (NQ, 4)
             p = np.einsum('...j, cjk->...ck', bc, node[cell[:, [0, 3, 1, 2]]]) # (NQ, NC, 2)
+
+            if p.shape[0] == 1: # 如果只有一个积分点
+                p = p.reshape(-1, 2)
         else:
             edge = self.entity('edge')[index]
             p = np.einsum('...j, ejk->...ek', bc, node[edge]) # (NQ, NE, 2)
@@ -200,7 +206,6 @@ class QuadrangleMesh(Mesh2d):
         self.ds.reinit(NN, cell)
 
 
-
     def angle(self):
         NC = self.number_of_cells()
         node = self.entity('node')
@@ -293,3 +298,160 @@ class QuadrangleMesh(Mesh2d):
             write_to_vtu(fname, node, NC, cellType, cell.flatten(),
                     nodedata=self.nodedata,
                     celldata=self.celldata)
+
+
+    ## @ingroup MeshGenerators
+    @classmethod
+    def from_polygon_gmsh(cls, vertices, h):
+        """
+        Generate a quadrilateral mesh for a polygonal region by gmsh.
+
+        @param vertices List of tuples representing vertices of the polygon
+        @param h Parameter controlling mesh density
+        @return QuadrilateralMesh instance
+        """
+        import gmsh
+        gmsh.initialize()
+        gmsh.model.add("Polygon")
+
+        # 创建多边形
+        lc = h  # 设置网格大小
+        polygon_points = []
+        for i, vertex in enumerate(vertices):
+            point = gmsh.model.geo.addPoint(vertex[0], vertex[1], 0, lc)
+            polygon_points.append(point)
+
+        # 添加线段和循环
+        lines = []
+        for i in range(len(polygon_points)):
+            line = gmsh.model.geo.addLine(polygon_points[i], polygon_points[(i+1) % len(polygon_points)])
+            lines.append(line)
+        curve_loop = gmsh.model.geo.addCurveLoop(lines)
+
+        # 创建平面表面
+        surface = gmsh.model.geo.addPlaneSurface([curve_loop])
+
+        # 同步几何模型
+        gmsh.model.geo.synchronize()
+
+        # 添加物理组
+        gmsh.model.addPhysicalGroup(2, [surface], tag=1)
+        gmsh.model.setPhysicalName(2, 1, "Polygon")
+
+        # 设置网格算法选项，使用 Quadrangle 2D 算法
+        gmsh.option.setNumber("Mesh.Algorithm", 8)
+        gmsh.option.setNumber("Mesh.RecombineAll", 1)
+        # 生成网格
+        gmsh.model.mesh.generate(2)
+
+        # 获取节点信息
+        node_tags, node_coords, _ = gmsh.model.mesh.getNodes()
+        node = np.array(node_coords, dtype=np.float64).reshape(-1, 3)[:, 0:2].copy()
+
+        # 获取四边形单元信息
+        quadrilateral_type = 3  # 四边形单元的类型编号为 3
+        quad_tags, quad_connectivity = gmsh.model.mesh.getElementsByType(quadrilateral_type)
+        cell = np.array(quad_connectivity, dtype=np.uint64).reshape(-1, 4) - 1
+
+        # 输出节点和单元数量
+        print(f"Number of nodes: {node.shape[0]}")
+        print(f"Number of quadrilaterals: {cell.shape[0]}")
+
+        gmsh.finalize()
+
+        NN = len(node)
+        isValidNode = np.zeros(NN, dtype=np.bool_)
+        isValidNode[cell] = True
+        node = node[isValidNode]
+        idxMap = np.zeros(NN, dtype=cell.dtype)
+        idxMap[isValidNode] = range(isValidNode.sum())
+        cell = idxMap[cell]
+    
+        return cls(node, cell)
+
+
+    @classmethod
+    def from_box(cls, box=[0, 1, 0, 1], nx=10, ny=10, threshold=None):
+        """
+        Generate a quadrilateral mesh for a rectangular domain.
+
+        :param box: list of four float values representing the x- and y-coordinates of the lower left and upper right corners of the domain (default: [0, 1, 0, 1])
+        :param nx: number of cells along the x-axis (default: 10)
+        :param ny: number of cells along the y-axis (default: 10)
+        :param threshold: optional function to filter cells based on their barycenter coordinates (default: None)
+        :return: TriangleMesh instance
+        """
+        NN = (nx+1)*(ny+1)
+        NC = nx*ny
+        node = np.zeros((NN,2))
+        X, Y = np.mgrid[
+                box[0]:box[1]:(nx+1)*1j,
+                box[2]:box[3]:(ny+1)*1j]
+        node[:, 0] = X.flat
+        node[:, 1] = Y.flat
+
+        idx = np.arange(NN).reshape(nx+1, ny+1)
+        cell = np.zeros((NC, 4), dtype=np.int_)
+        cell[:, 0] = idx[0:-1, 0:-1].flat
+        cell[:, 1] = idx[1:, 0:-1].flat
+        cell[:, 2] = idx[1:, 1:].flat
+        cell[:, 3] = idx[0:-1, 1:].flat
+
+        if threshold is not None:
+            bc = np.sum(node[cell, :], axis=1) / cell.shape[1]
+            isDelCell = threshold(bc)
+            cell = cell[~isDelCell]
+            isValidNode = np.zeros(NN, dtype=np.bool_)
+            isValidNode[cell] = True
+            node = node[isValidNode]
+            idxMap = np.zeros(NN, dtype=cell.dtype)
+            idxMap[isValidNode] = range(isValidNode.sum())
+            cell = idxMap[cell]
+
+        return cls(node, cell)
+
+
+    @classmethod
+    def from_unit_square(cls, nx=10, ny=10, threshold=None):
+        """
+        Generate a quadrilateral mesh for a unit square.
+
+        @param nx Number of divisions along the x-axis (default: 10)
+        @param ny Number of divisions along the y-axis (default: 10)
+        @param threshold Optional function to filter cells based on their barycenter coordinates (default: None)
+        @return TriangleMesh instance
+        """
+        return cls.from_box(box=[0, 1, 0, 1], nx=nx, ny=ny, threshold=threshold)
+
+
+    @classmethod
+    def from_one_quadrangle(cls, meshtype='square'):
+        """
+        Generate a quadrilateral mesh for a single quadrangle.
+
+        @param meshtype Type of quadrangle mesh, options are 'square', 'zhengfangxing', 'rectangle', 'rec', 'juxing', 'rhombus', 'lingxing' (default: 'square')
+        @return QuadrangleMesh instance
+        """
+        if meshtype in {'square', 'zhengfangxing'}:
+            node = np.array([
+                [0.0, 0.0],
+                [1.0, 0.0],
+                [1.0, 1.0],
+                [0.0, 1.0]], dtype=np.float64)
+        elif meshtype in {'rectangle', 'rec', 'juxing'}:
+            node = np.array([
+                [0.0, 0.0],
+                [2.0, 0.0],
+                [2.0, 1.0],
+                [0.0, 1.0]], dtype=np.float64)
+        elif meshtype in {'rhombus', 'lingxing'}:
+            node = np.array([
+                [0.0, 0.0],
+                [1.0, 0.0],
+                [1.5, np.sqrt(3) / 2],
+                [0.5, np.sqrt(3) / 2]], dtype=np.float64)
+        cell = np.array([[0, 1, 2, 3]], dtype=np.int_)
+        return cls(node, cell)
+
+
+

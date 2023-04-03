@@ -16,15 +16,23 @@ def find_node(
         showindex=False, color='r',
         markersize=20, fontsize=24, fontcolor='k', multiindex=None):
 
+    if len(node.shape) == 1:
+        GD = 1
+        node = node.reshape(-1, GD)
+    else:
+        GD = node.shape[-1]
+
     if node.shape[1] == 1:
         node = np.r_['1', node, np.zeros_like(node)]
+        GD = 2
+
     if index is None:
         index = range(node.shape[0])
     elif (type(index) is np.int_):
         index = np.array([index], dtype=np.int_)
-    elif (type(index) is np.ndarray) and (index.dtype == np.bool):
+    elif (type(index) is np.ndarray) and (index.dtype == np.bool_):
         index, = np.nonzero(index)
-    elif (type(index) is list) and (type(index[0]) is np.bool):
+    elif (type(index) is list) and (type(index[0]) is np.bool_):
         index, = np.nonzero(index)
     else:
         pass
@@ -38,8 +46,7 @@ def find_node(
         color = mapper.to_rgba(color)
 
     bc = node[index]
-    dim = node.shape[1]
-    if dim == 2:
+    if GD == 2:
         axes.scatter(bc[..., 0], bc[..., 1], c=color, s=markersize)
         if showindex:
             if multiindex is not None:
@@ -94,7 +101,8 @@ def find_entity(
         color='r', markersize=20,
         fontsize=24, fontcolor='k', multiindex=None):
 
-    bc = mesh.entity_barycenter(entity)
+    GD = mesh.geo_dimension()
+    bc = mesh.entity_barycenter(entity).reshape(-1, GD)
     if index is None:
         if entity == 'node':
             NN = mesh.number_of_nodes()
@@ -111,7 +119,7 @@ def find_entity(
         else:
             pass #TODO: raise a error
     elif (type(index) is np.ndarray) :
-        if index.dtype == np.bool:
+        if index.dtype == np.bool_:
             index, = np.nonzero(index)
     elif (type(index) is list) & (type(index[0]) is np.bool_):
         index, = np.nonzero(index)
@@ -143,6 +151,8 @@ def find_entity(
 
     bc = bc[index]
     if GD == 1:
+        if len(bc.shape) == 1:
+            bc = bc.reshape(-1, 1)
         n = len(bc)
         axes.scatter(bc[:, 0], np.zeros(n), c=color, s=markersize)
         if showindex:
@@ -335,11 +345,13 @@ def show_mesh_2d(
         cellcolor = mapper.to_rgba(cellcolor)
         if showcolorbar:
             f = axes.get_figure()
-            f.colorbar(mapper, shrink=0.5, ax=axes)
+            f.colorbar(mapper, shrink=colorbarshrink, ax=axes)
     node = mesh.entity('node')
     cell = mesh.entity('cell')
 
     if mesh.meshtype not in {'polygon', 'hepolygon', 'halfedge', 'halfedge2d'}:
+        if mesh.meshtype in {'StructureQuadMesh2d', 'UniformMesh2d'}:
+            node = node.reshape(-1, 2)
         if mesh.geo_dimension() == 2:
             poly = PolyCollection(node[cell[:, mesh.ds.ccw], :])
         else:
@@ -425,7 +437,18 @@ def show_mesh_3d(
                color=edgecolor)
         return axes.add_collection3d(edges)
 
-    face = mesh.boundary_face(threshold=threshold)
+    face = mesh.entity('face')
+    isBdFace = mesh.ds.boundary_face_flag()
+    if threshold is None:
+        face = face[isBdFace][:, mesh.ds.ccw]
+    else:
+        bc = mesh.entity_barycenter('cell')
+        isKeepCell = threshold(bc)
+        face2cell = mesh.ds.face_to_cell()
+        isInterfaceFace = np.sum(isKeepCell[face2cell[:, 0:2]], axis=-1) == 1
+        isBdFace = (np.sum(isKeepCell[face2cell[:, 0:2]], axis=-1) == 2) & isBdFace
+        face = face[isBdFace | isInterfaceFace][:, mesh.ds.ccw]
+
     faces = a3.art3d.Poly3DCollection(
             node[face],
             facecolor=facecolor,

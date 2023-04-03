@@ -6,8 +6,9 @@ This module provide many fem model
 
 '''
 
-from .PoissonFEMModel import PoissonFEMModel
-from .EllipticEignvalueFEMModel import EllipticEignvalueFEMModel
-#from .SurfacePoissonFEMModel import SurfacePoissonFEMModel
+from .BilinearForm import BilinearForm
+from .TrussStructureIntegrator import TrussStructureIntegrator
+from .MassIntegrator import MassIntegrator
+from .DiffusionIntegrator import DiffusionIntegrator
+from .ConvectionIntegrator import ConvectionIntegrator
 
-#from .PhaseFieldCrystalModel import PhaseFieldCrystalModel

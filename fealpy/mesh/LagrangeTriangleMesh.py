@@ -288,7 +288,7 @@ class LagrangeTriangleMesh(Mesh2d):
 
         TD = bc.shape[-1] - 1
         entity = self.entity(etype=TD)[index]
-        gphi = self.grad_shape_function(bc)
+        gphi = self.grad_shape_function(bc, index=index)
         J = np.einsum(
                 'cin, ...cim->...cnm',
                 self.node[entity[index], :], gphi) #(NC,ldof,GD),(NQ,NC,ldof,TD)
@@ -557,7 +557,7 @@ class CLagrangeTriangleDof2d():
 
         gdof = self.number_of_global_dofs()
         edge2dof = self.edge_to_dof()
-        isBdDof = np.zeros(gdof, dtype=np.bool)
+        isBdDof = np.zeros(gdof, dtype=np.bool_)
         isBdDof[edge2dof[index]] = True
         return isBdDof
 

@@ -30,11 +30,11 @@ class DirichletBC():
         gdof = space.number_of_global_dofs()
         GD = A.shape[0]//gdof
         if uh is None:
-            uh = self.space.function(dim=GD)
+            uh = self.space.function(dim=GD) # (gdof, GD) 其元素默认为 0 
         isDDof = space.set_dirichlet_bc(gD, uh, threshold=threshold)
         if GD > 1:
             isDDof = np.tile(isDDof, GD)
-            F = F.T.flat
+            F = F.T.flat # (gdof, GD) --> (GD*gdof, ) 把 F 按列展平
         x = uh.T.flat # 把 uh 按列展平
         F -= A@x
         bdIdx = np.zeros(A.shape[0], dtype=np.int_)
@@ -55,7 +55,7 @@ class DirichletBC():
         if dim > 1:
             isDDof = np.tile(isDDof, dim)
 
-        bdIdx = np.zeros((A.shape[0], ), np.int)
+        bdIdx = np.zeros((A.shape[0], ), np.int_)
         bdIdx[isDDof] = 1
         Tbd = spdiags(bdIdx, 0, A.shape[0], A.shape[0])
         T = spdiags(1-bdIdx, 0, A.shape[0], A.shape[0])
@@ -76,13 +76,13 @@ class DirichletBC():
         gdof = space.number_of_global_dofs()
         dim = A.shape[0]//gdof
         uh = space.function(dim=dim)
-        isDDof = space.set_dirichlet_bc(uh, gD, threshold=threshold)
+        isDDof = space.set_dirichlet_bc(self.gD, uh, threshold=threshold)
         if dim > 1:
             isDDof = np.tile(isDDof, dim)
             F = F.T.flat
-        x = uh.T.flat # 把 uh 按列展平
+        x = uh.T.flatten() # 把 uh 按列展平
         F -= A@x
-        F[isBdDof] = x[isBdDof] 
+        F[isDDof] = x[isDDof] 
         return F 
 
 class NeumannBC():
@@ -294,7 +294,7 @@ class BoundaryCondition():
             gdof = self.space.number_of_global_dofs()
             x = uh.T.flat # 把 uh 按列展平
             b -= A@x
-            bdIdx = np.zeros(dim*gdof, dtype=np.int)
+            bdIdx = np.zeros(dim*gdof, dtype=np.int_)
             bdIdx[isDDof] = 1
             Tbd = spdiags(bdIdx, 0, dim*gdof, dim*gdof)
             T = spdiags(1-bdIdx, 0, dim*gdof, dim*gdof)

@@ -1,6 +1,7 @@
-from .signed_distance_function import dmin, dmax, ddiff
+from .signed_distance_function import dmin, dmax, ddiff, dunion
 from .signed_distance_function import dcircle, drectangle, dpoly
 from .signed_distance_function import DistDomain2d, DistDomain3d
+from .signed_distance_function import dsphere, dcuboid, dcylinder
 from .sizing_function import huniform
 
 from .geoalg import project, find_cut_point
@@ -17,6 +18,8 @@ from .implicit_curve import FoliumCurve
 from .implicit_curve import LameCurve
 from .implicit_curve import PearShapedCurve
 from .implicit_curve import SpiricSectionsCurve
+from .implicit_curve import DoubleCircleCurve
+from .implicit_curve import DoubleBandY 
 
 from .implicit_surface import ScaledSurface
 from .implicit_surface import SphereSurface
@@ -38,4 +41,8 @@ from .implicit_curve import CircleCurve as Circle
 # Domain 
 from .CircleDomain import CircleDomain
 from .RectangleDomain import RectangleDomain
+
+from .CuboidDomain import CuboidDomain
 from .SphereDomain import SphereDomain
+from .CylinderDomain import CylinderDomain
+from .TorusDomain import TorusDomain

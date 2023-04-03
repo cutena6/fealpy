@@ -132,16 +132,17 @@ class StructureIntervalMesh(object):
 
         return A0, A1, A2
 
-    def function(self, etype='node'):
+    def function(self, etype='node', dtype=None):
         """
         @brief 返回一个定义在节点或者单元上的数组，元素取值为 0
         """
+        nx = self.ds.nx
+        dtype = self.ftype if dtype is None else dtype
+
         if etype in {'node', 0}:
-            NN = self.number_of_nodes()
-            uh = np.zeros(NN, dtype=self.ftype)
+            uh = np.zeros(nx+1, dtype=dtype)
         elif etype in {'cell', 1}:
-            NC = self.number_of_cells()
-            uh = np.zeros(NC, dtype=self.ftype)
+            uh = np.zeros(nx, dtype=dtype)
         return uh
     
     def interpolation(self, f, etype='node'):
@@ -281,13 +282,13 @@ class StructureIntervalMeshDataStructure():
 
     def boundary_node_flag(self):
         NN = self.NN
-        isBdNode = np.zeros(NN, dtype=np.bool)
+        isBdNode = np.zeros(NN, dtype=np.bool_)
         isBdNode[[0, -1]] = True
         return isBdNode
 
     def boundary_cell_flag(self):
         NC = self.NC
-        isBdCell = np.zeros((NC,), dtype=np.bool)
+        isBdCell = np.zeros((NC,), dtype=np.bool_)
         isBdCell[[0, -1]] = True
         return isBdCell
 

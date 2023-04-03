@@ -5,7 +5,10 @@ from .ScaledMonomialSpace3d import ScaledMonomialSpace3d
 from .LagrangeFiniteElementSpace import LagrangeFiniteElementSpace
 from .BernsteinFiniteElementSpace import BernsteinFiniteElementSpace
 
+from .LagrangeFiniteElementSpaceOnEdgeMesh import LagrangeFiniteElementSpaceOnEdgeMesh
 from .CrouzeixRaviartFiniteElementSpace import CrouzeixRaviartFiniteElementSpace
+
+from .LagrangeFESpace import LagrangeFESpace
 
 # H(div)
 from .RaviartThomasFiniteElementSpace2d import RaviartThomasFiniteElementSpace2d
@@ -15,6 +18,9 @@ from .RaviartThomasFiniteElementSpace3d import RaviartThomasFiniteElementSpace3d
 from .FirstKindNedelecFiniteElementSpace2d import FirstKindNedelecFiniteElementSpace2d
 from .FirstNedelecFiniteElementSpace2d import FirstNedelecFiniteElementSpace2d
 from .FirstNedelecFiniteElementSpace3d import FirstNedelecFiniteElementSpace3d
+
+from .SecondNedelecFiniteElementSpace2d import SecondNedelecFiniteElementSpace2d
+from .SecondNedelecFiniteElementSpace3d import SecondNedelecFiniteElementSpace3d
 
 # PFEM
 from .ParametricLagrangeFiniteElementSpace import ParametricLagrangeFiniteElementSpace

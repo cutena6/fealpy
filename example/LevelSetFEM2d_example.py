@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from fealpy.timeintegratoralg import UniformTimeLine
 from fealpy.mesh import MeshFactory as MF
 from fealpy.functionspace import LagrangeFiniteElementSpace
-from fealpy.decorator import cartesian,barycentric
+from fealpy.decorator import cartesian, barycentric
 from fealpy.solver import LevelSetFEMFastSolver
 
 import pickle
@@ -113,6 +113,7 @@ for i in range(nt):
     b = M@phi0 - dt/2*(C@phi0)
 
     phi0[:] = solver.solve(b, tol=1e-12)
+
     
     if output != 'None':
         fname = output + 'test_'+ str(i+1).zfill(10) + '.vtu'

@@ -37,24 +37,6 @@ class Mesh3d():
     def top_dimension(self):
         return 3
 
-    def boundary_face(self, threshold=None):
-        face = self.entity('face')
-        isBdFace = self.ds.boundary_face_flag()
-        if threshold is None:
-            return face[isBdFace]
-        else:
-            bc = self.entity_barycenter('cell')
-            isKeepCell = threshold(bc)
-            face2cell = self.ds.face_to_cell()
-            isInterfaceFace = np.sum(
-                    isKeepCell[face2cell[:, 0:2]],
-                    axis=-1) == 1
-            isBdFace = (np.sum(
-                    isKeepCell[face2cell[:, 0:2]],
-                    axis=-1) == 2) & isBdFace
-            return face[isBdFace | isInterfaceFace]
-
-
     def entity(self, etype='cell'):
         if etype in {'cell', 3}:
             return self.ds.cell
@@ -113,17 +95,18 @@ class Mesh3d():
     def add_plot(
             self, plot,
             nodecolor='k', edgecolor='k', facecolor='w', cellcolor='w',
-            aspect='equal',
+            aspect=[1, 1, 1],
             linewidths=0.5, markersize=20,
             showaxis=False, alpha=0.8, shownode=False, showedge=False, threshold=None):
 
         if isinstance(plot, ModuleType):
             from mpl_toolkits.mplot3d import Axes3D
             fig = plot.figure()
-            fig.set_facecolor('white')
-            axes = fig.gca(projection='3d')
+            axes = fig.add_subplot(111, projection='3d')
         else:
             axes = plot
+        axes.set_box_aspect(aspect)
+        axes.set_proj_type('ortho')
 
         return show_mesh_3d(
                 axes, self,
@@ -310,32 +293,32 @@ class Mesh3dDataStructure():
                     ), shape=(NC, NE))
             return cell2edge
 
-    def cell_to_edge_sign(self, cell):
+    def cell_to_edge_sign(self, cell=None):
         """
 
         TODO: check here
         """
+        if cell==None:
+            cell = self.cell
         NC = self.NC
         NEC = self.NEC
         cell2edgeSign = np.zeros((NC, NEC), dtype=np.bool_)
         localEdge = self.localEdge
+        E = localEdge.shape[0]
         for i, (j, k) in zip(range(E), localEdge):
             cell2edgeSign[:, i] = cell[:, j] < cell[:, k]
         return cell2edgeSign
 
-    def cell_to_edge_sign1(self):
+    def cell_to_face_sign(self):
         """
-
-        TODO: check here
         """
         NC = self.NC
-        NEC = self.NEC
-        localEdge = self.localEdge
-        cell = self.cell
-        edge = self.edge
-        cell2edge = self.cell_to_edge()
-        cell2edgeSign = edge[cell2edge, 0]==cell[:, localEdge[:, 0]]
-        return cell2edgeSign
+        NF = self.NF
+        face2cell = self.face2cell
+        NFC = self.NFC
+        cell2facesign = np.zeros((NC, NFC), dtype=self.bool_)
+        cell2facesign[face2cell[:, 0], face2cell[:, 2]] = True 
+        return cell2facesign
 
     def cell_to_face(self, return_sparse=False):
         NC = self.NC

@@ -23,7 +23,7 @@ from .LagrangeTriangleMesh import LagrangeTriangleMesh
 
 from .distmesh import DistMesh2d
 
-from .interface_mesh_generator import InterfaceMesh2d
+#from .interface_mesh_generator import InterfaceMesh2d
 
 def write_to_vtu(fname, mesh, nodedata=None, celldata=None, p=1):
     if p == 1:
@@ -201,10 +201,11 @@ def boxmesh2d(box, nx=10, ny=10, meshtype='tri', threshold=None,
     node[:, 0] = X.flatten()
     node[:, 1] = Y.flatten()
     NN = len(node)
+    print(N)
 
     idx = np.arange(N).reshape(nx+1, ny+1)
     if meshtype in {'tri', 'triangle'}:
-        cell = np.zeros((2*NC, 3), dtype=np.int)
+        cell = np.zeros((2*NC, 3), dtype=np.int_)
         cell[:NC, 0] = idx[1:,0:-1].flatten(order='F')
         cell[:NC, 1] = idx[1:,1:].flatten(order='F')
         cell[:NC, 2] = idx[0:-1, 0:-1].flatten(order='F')
@@ -251,7 +252,11 @@ def boxmesh2d(box, nx=10, ny=10, meshtype='tri', threshold=None,
         pnode, pcell, pcellLocation = mesh.to_polygonmesh()
         return PolygonMesh(pnode, pcell, pcellLocation)
     elif meshtype == 'noconvex':
-        mesh = StructureQuadMesh(box, nx, ny)
+        mesh0 = StructureQuadMesh(box, nx, ny)
+        node0 = mesh0.entity("node")
+        cell0 = mesh0.entity("cell")[:, [0, 2, 3, 1]]
+        mesh = QuadrangleMesh(node0, cell0)
+
         edge = mesh.entity("edge")
         node = mesh.entity("node")
         cell = mesh.entity("cell")
@@ -369,7 +374,7 @@ def special_boxmesh2d(box, n=10,
     NE = qmesh.number_of_edges()
     NC = qmesh.number_of_cells()
     if meshtype == 'fishbone':
-        isLeftCell = np.zeros((n, n), dtype=np.bool)
+        isLeftCell = np.zeros((n, n), dtype=np.bool_)
         isLeftCell[0::2, :] = True
         isLeftCell = isLeftCell.reshape(-1)
         lcell = cell[isLeftCell]
@@ -384,7 +389,7 @@ def special_boxmesh2d(box, n=10,
         bc = qmesh.entity_barycenter('cell') 
         newNode = np.r_['0', node, bc]
 
-        newCell = np.zeros((4*NC, 3), dtype=np.int) 
+        newCell = np.zeros((4*NC, 3), dtype=np.int_) 
         newCell[0:NC, 0] = range(NN, NN+NC)
         newCell[0:NC, 1:3] = cell[:, 0:2]
         
@@ -398,7 +403,7 @@ def special_boxmesh2d(box, n=10,
         newCell[3*NC:4*NC, 1:3] = cell[:, [3, 0]] 
         return TriangleMesh(newNode, newCell)
     elif meshtype == 'rice':
-        isLeftCell = np.zeros((n, n), dtype=np.bool)
+        isLeftCell = np.zeros((n, n), dtype=np.bool_)
         isLeftCell[0, 0::2] = True
         isLeftCell[1, 1::2] = True
         if n > 2:
@@ -464,7 +469,7 @@ def lshape_mesh(n=4):
         (3, 6, 2),
         (5, 2, 6),
         (4, 7, 3),
-        (6, 3, 7)], dtype=np.int)
+        (6, 3, 7)], dtype=np.int_)
     mesh = TriangleMesh(point, cell)
     mesh.uniform_refine(n)
     return mesh
@@ -541,7 +546,7 @@ def uncross_mesh(box, n=10, r="1"):
         bc = qmesh.barycenter('cell') + ll/4
         newNode = np.r_['0',node, bc]
 
-    newCell = np.zeros((4*NC, 3), dtype=np.int) 
+    newCell = np.zeros((4*NC, 3), dtype=np.int_) 
     newCell[0:NC, 0] = range(NN, NN+NC)
     newCell[0:NC, 1:3] = cell[:, 0:2]
         

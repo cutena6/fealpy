@@ -60,13 +60,13 @@ class Mesh2d(object):
 
     def entity_barycenter(self, etype=2, index=np.s_[:]):
         node = self.node
-        if etype in ['cell', 2]:
+        if etype in {'cell', 2}:
             cell = self.ds.cell
             bc = np.sum(node[cell[index], :], axis=1)/cell.shape[1]
-        elif etype in ['edge', 'face', 1]:
+        elif etype in {'edge', 'face', 1}:
             edge = self.ds.edge
             bc = np.sum(node[edge[index], :], axis=1)/edge.shape[1]
-        elif etype in ['node', 0]:
+        elif etype in {'node', 0}:
             bc = node[index]
         else:
             raise ValueError('the entity `{}` is not correct!'.format(entity)) 
@@ -123,6 +123,20 @@ class Mesh2d(object):
         length = np.sqrt(np.sum(v**2,axis=1))
         return length
 
+    def cell_area(self, index=None):
+        NC = self.number_of_cells()
+        node = self.entity('node')
+        edge = self.entity('edge')
+        edge2cell = self.ds.edge_to_cell()
+        isInEdge = (edge2cell[:, 0] != edge2cell[:, 1])
+        w = np.array([[0, -1], [1, 0]])
+        v= (node[edge[:, 1], :] - node[edge[:, 0], :])@w
+        val = np.sum(v*node[edge[:, 0], :], axis=1)
+        a = np.bincount(edge2cell[:, 0], weights=val, minlength=NC)
+        a+= np.bincount(edge2cell[isInEdge, 1], weights=-val[isInEdge], minlength=NC)
+        a /=2
+        return a
+
     def edge_frame(self, index=np.s_[:]):
         t = self.edge_unit_tangent(index=index)
         w = np.array([(0,-1),(1,0)])
@@ -157,7 +171,7 @@ class Mesh2d(object):
     def add_plot(
             self, plot,
             nodecolor='w', edgecolor='k',
-            cellcolor=[0.5, 0.9, 0.45], aspect='equal',
+            cellcolor=[0.5, 0.9, 0.45], aspect=None,
             linewidths=1, markersize=50,
             showaxis=False, showcolorbar=False, 
             cmax=None, cmin=None, 
@@ -169,6 +183,15 @@ class Mesh2d(object):
             axes = fig.gca()
         else:
             axes = plot
+
+        GD = self.geo_dimension()
+        if (aspect is None) and (GD == 3):
+            axes.set_box_aspect((1, 1, 1))
+            axes.set_proj_type('ortho')
+
+        if (aspect is None) and (GD == 2):
+            axes.set_box_aspect(1)
+
         return show_mesh_2d(axes, self,
                 nodecolor=nodecolor, edgecolor=edgecolor,
                 cellcolor=cellcolor, aspect=aspect,
@@ -181,12 +204,10 @@ class Mesh2d(object):
             color='r', markersize=10,
             fontsize=10, fontcolor='r', multiindex=None):
 
+        GD = self.geo_dimension()
+
         if node is None:
             node = self.node
-
-        if (index is None) and (showindex == True):
-            NN = node.shape[0] 
-            index = np.array(range(NN))
 
         find_node(axes, node,
                 index=index, showindex=showindex,
@@ -333,21 +354,20 @@ class Mesh2dDataStructure():
                     shape=(NC, NE), dtype=np.bool_)
             return cell2edge 
 
-    def cell_to_edge_sign(self, return_sparse=False):
+    def cell_to_edge_sign(self):
         NE = self.NE
         NC = self.NC
         NEC = self.NEC
 
         edge2cell = self.edge2cell
-        if return_sparse == False:
-            cell2edgeSign = np.zeros((NC, NEC), dtype=np.bool_)
-            cell2edgeSign[edge2cell[:, 0], edge2cell[:, 2]] = True
-        else:
-            val = np.ones(NE, dtype=np.bool_)
-            cell2edgeSign = csr_matrix(
-                    (val, (edge2cell[:, 0], range(NE))),
-                    shape=(NC, NE), dtype=np.bool_)
+
+        cell2edgeSign = np.zeros((NC, NEC), dtype=np.bool_)
+        cell2edgeSign[edge2cell[:, 0], edge2cell[:, 2]] = True
+
         return cell2edgeSign
+
+    def cell_to_face_sign(self):
+        return self.cell_to_edge_sign()
 
     def cell_to_face(self, return_sparse=False):
         """ The neighbor information of cell to edge

@@ -7,10 +7,16 @@ from .Mesh3d import Mesh3d, Mesh3dDataStructure
 from ..quadrature import TetrahedronQuadrature, TriangleQuadrature, GaussLegendreQuadrature
 from ..decorator import timer
 
+
 class TetrahedronMeshDataStructure(Mesh3dDataStructure):
+    OFace = np.array([(1, 2, 3),  (0, 3, 2), (0, 1, 3), (0, 2, 1)])
+    SFace = np.array([(1, 2, 3),  (0, 2, 3), (0, 1, 3), (0, 1, 2)])  
+    ccw = np.array([0, 1, 2])
+
     localFace = np.array([(1, 2, 3),  (0, 3, 2), (0, 1, 3), (0, 2, 1)])
     localEdge = np.array([(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)])
     localFace2edge = np.array([(5, 4, 3), (5, 1, 2), (4, 2, 0), (3, 0, 1)])
+    localEdge2face = np.array([[2, 3], [3, 1], [1, 2], [0, 3], [2, 0], [0, 1]])
     localCell = np.array([
        (0, 1, 2, 3), (0, 2, 3, 1), (0, 3, 1, 2),
        (1, 2, 0, 3), (1, 0, 3, 2), (1, 3, 2, 0),
@@ -31,6 +37,9 @@ class TetrahedronMeshDataStructure(Mesh3dDataStructure):
     def face_to_edge_sign(self):
         face2edge = self.face_to_edge()
         edge = self.edge
+        face = self.face
+        NF = len(face2edge)
+        NEF = 3
         face2edgeSign = np.zeros((NF, NEF), dtype=np.bool_)
         n = [1, 2, 0]
         for i in range(3):
@@ -38,8 +47,20 @@ class TetrahedronMeshDataStructure(Mesh3dDataStructure):
         return face2edgeSign
 
 
+## @defgroup MeshGenerators TetrhedronMesh Common Region Mesh Generators
+## @defgroup MeshQuality
 class TetrahedronMesh(Mesh3d):
     def __init__(self, node, cell, showmemory=False):
+        """
+        @brief Initializes a TetrahedronMesh object.
+        
+        @param[in] node The node array representing the vertices of the tetrahedral mesh.
+        @param[in] cell The cell array representing the connectivity of the tetrahedral mesh.
+        @param[in] showmemory Optional boolean to show memory usage (default is False).
+        
+        This method initializes a TetrahedronMesh object by setting up its attributes
+        and data structures based on the provided node and cell arrays.
+        """
         self.node = node
         NN = node.shape[0]
         self.ds = TetrahedronMeshDataStructure(NN, cell)
@@ -148,6 +169,76 @@ class TetrahedronMesh(Mesh3d):
             multiIndex[:, 1] = p - multiIndex[:, 0]
             return multiIndex
 
+    def grad_lambda(self, index=np.s_[:]):
+        localFace = self.ds.localFace
+        node = self.node
+        cell = self.ds.cell
+        NC = self.number_of_cells() if index == np.s_[:] else len(index)
+        Dlambda = np.zeros((NC, 4, 3), dtype=self.ftype)
+        volume = self.entity_measure('cell', index=index)
+        for i in range(4):
+            j,k,m = localFace[i]
+            vjk = node[cell[index, k],:] - node[cell[index, j],:]
+            vjm = node[cell[index, m],:] - node[cell[index, j],:]
+            Dlambda[:, i, :] = np.cross(vjm, vjk)/(6*volume.reshape(-1, 1))
+        return Dlambda
+
+    def shape_function(self, bc, p=1):
+        """
+        @brief 
+        """
+        TD = bc.shape[-1] - 1 
+        multiIndex = self.multi_index_matrix(p)
+        c = np.arange(1, p+1, dtype=np.int_)
+        P = 1.0/np.multiply.accumulate(c)
+        t = np.arange(0, p)
+        shape = bc.shape[:-1]+(p+1, TD+1)
+        A = np.ones(shape, dtype=self.ftype)
+        A[..., 1:, :] = p*bc[..., np.newaxis, :] - t.reshape(-1, 1)
+        np.cumprod(A, axis=-2, out=A)
+        A[..., 1:, :] *= P.reshape(-1, 1)
+        idx = np.arange(TD+1)
+        phi = np.prod(A[..., multiIndex, idx], axis=-1)
+        return phi
+
+    def grad_shape_function(self, bc, p=1, index=np.s_[:]):
+
+        TD = self.top_dimension()
+
+        multiIndex = self.multi_index_matrix(p)
+
+        c = np.arange(1, p+1, dtype=self.itype)
+        P = 1.0/np.multiply.accumulate(c)
+
+        t = np.arange(0, p)
+        shape = bc.shape[:-1]+(p+1, TD+1)
+        A = np.ones(shape, dtype=self.ftype)
+        A[..., 1:, :] = p*bc[..., np.newaxis, :] - t.reshape(-1, 1)
+
+        FF = np.einsum('...jk, m->...kjm', A[..., 1:, :], np.ones(p))
+        FF[..., range(p), range(p)] = p
+        np.cumprod(FF, axis=-2, out=FF)
+        F = np.zeros(shape, dtype=self.ftype)
+        F[..., 1:, :] = np.sum(np.tril(FF), axis=-1).swapaxes(-1, -2)
+        F[..., 1:, :] *= P.reshape(-1, 1)
+
+        np.cumprod(A, axis=-2, out=A)
+        A[..., 1:, :] *= P.reshape(-1, 1)
+
+        Q = A[..., multiIndex, range(TD+1)]
+        M = F[..., multiIndex, range(TD+1)]
+        ldof = self.number_of_local_ipoints(p)
+        shape = bc.shape[:-1]+(ldof, TD+1)
+        R = np.zeros(shape, dtype=self.ftype)
+        for i in range(TD+1):
+            idx = list(range(TD+1))
+            idx.remove(i)
+            R[..., i] = M[..., i]*np.prod(Q[..., idx], axis=-1)
+
+        Dlambda = self.grad_lambda(index=index)
+        gphi = np.einsum('...ij, kjm->...kim', R, Dlambda)
+        return gphi #(..., NC, ldof, GD)
+
     def interpolation_points(self, p):
         """
         @brief 获取整个四面体网格上的全部插值点
@@ -193,27 +284,28 @@ class TetrahedronMesh(Mesh3d):
                     node[cell,:]).reshape(-1, GD)
         return ipoints
 
-    def number_of_local_ipoints(self, p):
+    def number_of_local_ipoints(self, p, iptype='cell'):
         """
         @brief 每个四面体单元上插值点的个数
         """
-        return (p+1)*(p+2)*(p+3)//6
+        if iptype in {'cell', 3}:
+            return (p+1)*(p+2)*(p+3)//6
+        elif iptype in {'face', 2}:
+            return (p+1)*(p+2)//2 
+        elif iptype in {'edge', 1}:
+            return self.p + 1
+        elif iptype in {'node', 0}:
+            return 1
     
     def number_of_global_ipoints(self, p):
         """
         @brief 四面体网格上插值点的总数
         """
-        NP = self.number_of_nodes()
-        if p > 1:
-            NE = self.number_of_edges()
-            NP += (p-1)*NE
-        if p > 2:
-            NF = self.number_of_faces()
-            NP += (p-2)*(p-1)*NF//2
-        if p > 3:
-            NC = self.number_of_cells()
-            NP += (p-3)*(p-2)*(p-1)*NC//6
-        return NP
+        NN = self.number_of_nodes()
+        NE = self.number_of_edges()
+        NF = self.number_of_faces()
+        NC = self.number_of_cells()
+        return NN + NE*(p-1) + NF*(p-2)*(p-1)//2 + NC*(p-3)*(p-2)*(p-1)//6
     
     def edge_to_ipoint(self, p):
         """
@@ -389,19 +481,6 @@ class TetrahedronMesh(Mesh3d):
             return VTK_LINE
 
     def to_vtk(self, etype='cell', index=np.s_[:], fname=None):
-        """
-
-        Parameters
-        ----------
-        points: vtkPoints object
-        cells:  vtkCells object
-        pdata:  
-        cdata:
-
-        Notes
-        -----
-        把网格转化为 VTK 的格式
-        """
         from .vtk_extent import vtk_cell_index, write_to_vtu
 
         node = self.entity('node')
@@ -433,16 +512,6 @@ class TetrahedronMesh(Mesh3d):
                     celldata=celldata)
 
     def location(self, points):
-        """
-        @brief 计算给定点所在的四面体单元
-
-        这里假设：
-
-        1. 网格中没有洞
-        2. 区域还要是凸的
-
-        """
-
 
         NN = self.number_of_nodes()
         NC = self.number_of_cells()
@@ -469,7 +538,7 @@ class TetrahedronMesh(Mesh3d):
         self.celldata['cell'][start] = 1
 
         localFace = self.ds.localFace
-        isNotOK = np.ones(NP, dtype=np.bool)
+        isNotOK = np.ones(NP, dtype=np.bool_)
         while np.any(isNotOK):
             idx = start[isNotOK] # 试探的单元编号
             pp = points[isNotOK] # 还没有找到所在单元的点的坐标
@@ -605,7 +674,8 @@ class TetrahedronMesh(Mesh3d):
         else:
             return c
 
-    def quality(self):
+    ## @ingroup MeshQuality
+    def cell_quality(self):
         """
         @brief  计算单元的质量，这里的质量定义单元外接球的半径比上 3 倍的内接球的半径
         """
@@ -618,16 +688,19 @@ class TetrahedronMesh(Mesh3d):
         R = ld/vol/12.0
         r = 3.0*vol/ss
         return R/r/3.0
-
+    
+    ## @ingroup MeshQuality
     def grad_quality(self):
         """
         @brief 计算单元质量关于节点坐标的导数
-        """
-        cell = self.ds.cell
-        node = self.node
 
-        N = self.number_of_nodes()
+        """
+
+        NN = self.number_of_nodes()
         NC = self.number_of_cells()
+
+        cell = self.entity('cell')
+        node = self.entity('node')
 
         s = self.face_area()
         cell2face = self.ds.cell_to_face()
@@ -668,26 +741,13 @@ class TetrahedronMesh(Mesh3d):
 
         g *= q.reshape(-1, 1, 1)
         w *= q.reshape(-1, 1)
-        grad = np.zeros((N, 3), dtype=self.ftype)
+        grad = np.zeros((NN, 3), dtype=self.ftype)
         np.add.at(grad, cell.flatten(), g.reshape(-1, 3))
-        wgt = np.zeros(N, dtype=self.ftype)
+        wgt = np.zeros(NN, dtype=self.ftype)
         np.add.at(wgt, cell.flat, w.flat)
 
         return grad/wgt.reshape(-1, 1)
 
-    def grad_lambda(self):
-        localFace = self.ds.localFace
-        node = self.node
-        cell = self.ds.cell
-        NC = self.number_of_cells()
-        Dlambda = np.zeros((NC, 4, 3), dtype=self.ftype)
-        volume = self.cell_volume()
-        for i in range(4):
-            j,k,m = localFace[i]
-            vjk = node[cell[:,k],:] - node[cell[:,j],:]
-            vjm = node[cell[:,m],:] - node[cell[:,j],:]
-            Dlambda[:,i,:] = np.cross(vjm, vjk)/(6*volume.reshape(-1, 1))
-        return Dlambda
 
     def label(self, node=None, cell=None, cellidx=None):
         """
@@ -777,7 +837,7 @@ class TetrahedronMesh(Mesh3d):
         nCut = 0
 
         # 非协调边的标记数组 
-        nonConforming = np.ones(8*NN, dtype=np.bool)
+        nonConforming = np.ones(8*NN, dtype=np.bool_)
         IM = eye(NN)
         while len(markedCell) != 0:
             # 标记最长边
@@ -801,7 +861,7 @@ class TetrahedronMesh(Mesh3d):
                 NE = len(ncEdge)
                 I = cutEdge[ncEdge][:, [2, 2]].reshape(-1)
                 J = cutEdge[ncEdge][:, [0, 1]].reshape(-1)
-                val = np.ones(len(I), dtype=np.bool)
+                val = np.ones(len(I), dtype=np.bool_)
                 nv2v = csr_matrix(
                         (val, (I, J)),
                         shape=(NN, NN))
@@ -816,12 +876,12 @@ class TetrahedronMesh(Mesh3d):
                 cellCutEdge.sort(axis=0)
                 s = csr_matrix(
                     (
-                        np.ones(NE, dtype=np.bool),
+                        np.ones(NE, dtype=np.bool_),
                         (
                             cellCutEdge[0, ...],
                             cellCutEdge[1, ...]
                         )
-                    ), shape=(NN, NN), dtype=np.bool)
+                    ), shape=(NN, NN), dtype=np.bool_)
                 # 获得唯一的边 
                 i, j = s.nonzero()
                 nNew = len(i)
@@ -847,7 +907,7 @@ class TetrahedronMesh(Mesh3d):
                 # 新点和旧点的邻接矩阵 
                 I = cutEdge[newCutEdge][:, [2, 2]].reshape(-1)
                 J = cutEdge[newCutEdge][:, [0, 1]].reshape(-1)
-                val = np.ones(len(I), dtype=np.bool)
+                val = np.ones(len(I), dtype=np.bool_)
                 nv2v = csr_matrix(
                         (val, (I, J)),
                         shape=(NN, NN))
@@ -879,7 +939,7 @@ class TetrahedronMesh(Mesh3d):
 
             # 找到非协调的单元 
             checkEdge, = np.nonzero(nonConforming[:nCut])
-            isCheckNode = np.zeros(NN, dtype=np.bool)
+            isCheckNode = np.zeros(NN, dtype=np.bool_)
             isCheckNode[cutEdge[checkEdge]] = True
             isCheckCell = np.sum(
                     isCheckNode[cell[:NC]],
@@ -888,7 +948,7 @@ class TetrahedronMesh(Mesh3d):
             checkCell, = np.nonzero(isCheckCell)
             I = np.repeat(checkCell, 4)
             J = cell[checkCell].reshape(-1)
-            val = np.ones(len(I), dtype=np.bool)
+            val = np.ones(len(I), dtype=np.bool_)
             cell2node = csr_matrix((val, (I, J)), shape=(NC, NN))
             i, j = np.nonzero(
                     cell2node[:, cutEdge[checkEdge, 0]].multiply(
@@ -911,18 +971,23 @@ class TetrahedronMesh(Mesh3d):
 
     @timer
     def uniform_refine(self, n=1):
+        """
+        Perform uniform refinement on the tetrahedral mesh.
+
+        @param n Number of refinement iterations (default: 1)
+        """
         for i in range(n):
-            N = self.number_of_nodes()
+            NN = self.number_of_nodes()
             NC = self.number_of_cells()
             NE = self.number_of_edges()
 
-            node = self.node
-            edge = self.ds.edge
-            cell = self.ds.cell
+            node = self.entity('node')
+            edge = self.entity('edge')
+            cell = self.entity('cell')
             cell2edge = self.ds.cell_to_edge()
 
-            edge2newNode = np.arange(N, N+NE)
-            newNode = (node[edge[:,0],:]+node[edge[:,1],:])/2.0
+            edge2newNode = np.arange(NN, NN+NE)
+            newNode = (node[edge[:,0], :]+node[edge[:,1], :])/2.0
 
             self.node = np.concatenate((node, newNode), axis=0)
 
@@ -972,16 +1037,190 @@ class TetrahedronMesh(Mesh3d):
             N = self.number_of_nodes()
             self.ds.reinit(N, newCell)
 
-    def is_valid(self):
-        vol = self.volume()
-        return np.all(vol > 1e-15)
+    def is_valid(self, threshold=1e-15):
+        """
+        Check if the tetrahedral mesh is valid.
 
-    def print(self):
-        print("Node:\n", self.node)
-        print("Cell:\n", self.ds.cell)
-        print("Edge:\n", self.ds.edge)
-        print("Face:\n", self.ds.face)
-        print("Face2cell:\n", self.ds.face2cell)
-        print("Cell2face:\n", self.ds.cell_to_face())
+        @param threshold 
+
+        @return True if all tetrahedra have positive volume, False otherwise
+        """
+        vol = self.cell_volume()
+        return np.all(vol > threshold)
 
 
+    ## @ingroup MeshGenerators
+    @classmethod
+    def from_one_tetrahedron(cls, meshtype='equ'):
+        """
+        """
+        if meshtype == 'equ':
+            node = np.array([
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.5, np.sqrt(3)/2, 0.0],
+                [0.5, np.sqrt(3)/6, np.sqrt(2/3)]], dtype=np.float64)
+        elif meshtype == 'iso':
+            node = np.array([
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0]], dtype=np.float64)
+        cell = np.array([[0, 1, 2, 3]], dtype=np.int_)
+        return cls(node, cell)
+
+    ## @ingroup MeshGenerators
+    @classmethod
+    def from_unit_sphere_gmsh(cls, h): 
+        """
+        Generate a tetrahedral mesh for a unit sphere by gmsh.
+
+        @param h Parameter controlling mesh density
+        @return TetrhedronMesh instance
+        """
+        import gmsh
+        gmsh.initialize()
+        gmsh.model.add("UnitSphere")
+
+        # 创建球体
+        lc = 0.1  # 设置网格大小
+        R = 1.0  # 单位球半径
+        volume = gmsh.model.occ.addSphere(0, 0, 0, R)
+
+        # 同步几何模型
+        gmsh.model.occ.synchronize()
+
+        # 添加物理组
+        gmsh.model.addPhysicalGroup(3, [volume], tag=1)
+        gmsh.model.setPhysicalName(3, 1, "Sphere")
+
+        # 设置网格大小
+        gmsh.option.setNumber("Mesh.CharacteristicLengthMax", lc)
+
+        # 生成网格
+        gmsh.model.mesh.generate(3)
+
+        # 获取节点信息
+        node_tags, node_coords, _ = gmsh.model.mesh.getNodes()
+        node = np.array(node_coords, dtype=np.float64).reshape(-1, 3)
+
+        # 获取四面体单元信息
+        tetrahedron_type = 4  # 四面体单元的类型编号为 4
+        tetrahedron_tags, tetrahedron_connectivity = gmsh.model.mesh.getElementsByType(tetrahedron_type)
+        cell = np.array(tetrahedron_connectivity, dtype=np.int_).reshape(-1, 4) - 1
+
+        # 输出节点和单元数量
+        print(f"Number of nodes: {node.shape[0]}")
+        print(f"Number of tetrahedra: {cell.shape[0]}")
+
+        gmsh.finalize()
+
+        NN = len(node)
+        isValidNode = np.zeros(NN, dtype=np.bool_)
+        isValidNode[cell] = True
+        node = node[isValidNode]
+        idxMap = np.zeros(NN, dtype=cell.dtype)
+        idxMap[isValidNode] = range(isValidNode.sum())
+        cell = idxMap[cell]
+
+        return cls(node, cell)
+
+    ## @ingroup MeshGenerators
+    @classmethod
+    def from_unit_cube(cls, nx=10, ny=10, nz=10, threshold=None):
+        """
+        Generate a tetrahedral mesh for a unit cube.
+        
+        @param nx Number of divisions along the x-axis (default: 10)
+        @param ny Number of divisions along the y-axis (default: 10)
+        @param nz Number of divisions along the z-axis (default: 10)
+        @param threshold Optional function to filter cells based on their barycenter coordinates (default: None)
+        @return TetrahedronMesh instance
+        """ 
+        return cls.from_box(box=[0, 1, 0, 1, 0, 1], nx=nx, ny=ny, nz=nz, threshold=threshold)
+
+    ## @ingroup MeshGenerators
+    @classmethod
+    def from_box(cls, box=[0, 1, 0, 1, 0, 1], nx=10, ny=10, nz=10, threshold=None):
+        """
+        Generate a tetrahedral mesh for a box domain.
+        
+        @param nx Number of divisions along the x-axis (default: 10)
+        @param ny Number of divisions along the y-axis (default: 10)
+        @param nz Number of divisions along the z-axis (default: 10)
+        @param threshold Optional function to filter cells based on their barycenter coordinates (default: None)
+        @return TetrahedronMesh instance
+        """ 
+        NN = (nx+1)*(ny+1)*(nz+1)
+        NC = nx*ny*nz
+        node = np.zeros((NN, 3), dtype=np.float64)
+        X, Y, Z = np.mgrid[
+                box[0]:box[1]:(nx+1)*1j, 
+                box[2]:box[3]:(ny+1)*1j,
+                box[4]:box[5]:(nz+1)*1j
+                ]
+        node[:, 0] = X.flat
+        node[:, 1] = Y.flat
+        node[:, 2] = Z.flat
+
+        idx = np.arange(NN).reshape(nx+1, ny+1, nz+1)
+        c = idx[:-1, :-1, :-1]
+
+        cell = np.zeros((NC, 8), dtype=np.int_)
+        nyz = (ny + 1)*(nz + 1)
+        cell[:, 0] = c.flatten()
+        cell[:, 1] = cell[:, 0] + nyz
+        cell[:, 2] = cell[:, 1] + nz + 1
+        cell[:, 3] = cell[:, 0] + nz + 1
+        cell[:, 4] = cell[:, 0] + 1
+        cell[:, 5] = cell[:, 4] + nyz
+        cell[:, 6] = cell[:, 5] + nz + 1
+        cell[:, 7] = cell[:, 4] + nz + 1
+
+        localCell = np.array([
+            [0, 1, 2, 6],
+            [0, 5, 1, 6],
+            [0, 4, 5, 6],
+            [0, 7, 4, 6],
+            [0, 3, 7, 6],
+            [0, 2, 3, 6]], dtype=np.int_)
+        cell = cell[:, localCell].reshape(-1, 4)
+
+        if threshold is not None:
+            NN = len(node)
+            bc = np.sum(node[cell, :], axis=1)/cell.shape[1]
+            isDelCell = threshold(bc) 
+            cell = cell[~isDelCell]
+            isValidNode = np.zeros(NN, dtype=np.bool_)
+            isValidNode[cell] = True
+            node = node[isValidNode]
+            idxMap = np.zeros(NN, dtype=cell.dtype)
+            idxMap[isValidNode] = range(isValidNode.sum())
+            cell = idxMap[cell]
+
+        return TetrahedronMesh(node, cell)
+
+    def print_cformat(self):
+        def print_cpp_array(arr):
+            print("int arr[{}][{}] = {{".format(arr.shape[0], arr.shape[1]))
+            for i in range(arr.shape[0]):
+                if(i%4==3):
+                    print("{" + ", ".join(str(x) for x in arr[i]) + "},", end='\n')
+                elif(i%4==0):
+                    print("    {" + ", ".join(str(x) for x in arr[i]) + "},", end='')
+                else:
+                    print("{" + ", ".join(str(x) for x in arr[i]) + "},", end='')
+            print("};")
+
+        print("Node:")
+        print_cpp_array(self.node)
+        print("Cell:")
+        print_cpp_array(self.ds.cell)
+        print("Edge:")
+        print_cpp_array(self.ds.edge)
+        print("Face:")
+        print_cpp_array(self.ds.face)
+        print("Face2cell:")
+        print_cpp_array(self.ds.face2cell)
+        print("Cell2face:")
+        print_cpp_array(self.ds.cell_to_face())
